@@ -21,7 +21,7 @@ def login(user: UserCreate, db: Session = Depends(get_db)):
     result = login_user(db,user.email,user.password)
     if not result:
         raise HTTPException(
-            status_code=status.HTTP_201_UNAUTHORIZED,
+            status_code=status.HTTP_401_UNAUTHORIZED,
             detail="Invalid Credentials.",
             headers={"WWW-Authenticate": "Bearer"}
         )

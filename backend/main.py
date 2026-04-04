@@ -1,6 +1,8 @@
 from fastapi import FastAPI
 from fastapi.middleware.cors import CORSMiddleware
 from routers import auth
+import models.user
+import models.transaction
 
 app = FastAPI(title="Ledgr API")
 
