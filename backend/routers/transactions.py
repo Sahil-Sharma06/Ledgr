@@ -1,8 +1,9 @@
-from fastapi import APIRouter, Depends, HTTPException, status
+from fastapi import APIRouter, Depends, HTTPException, status, Query
 from sqlalchemy.orm import Session
 from database import get_db
 from core.dependencies import get_current_user
 from models.user import User
+from models.transaction import TransactionType
 from schemas.transaction import TransactionCreate, TransactionOut, TransactionUpdate
 from services.transaction_service import (
     get_transactions,
@@ -11,53 +12,46 @@ from services.transaction_service import (
     delete_transaction,
     get_balance,
 )
-from typing import List
+from typing import List, Optional
 
-# Same pattern as auth.py — we create a router with a prefix and a tag.
-# All routes here will be under /transactions/...
-# The tag "transactions" groups them separately in the Swagger UI at /docs.
 router = APIRouter(prefix="/transactions", tags=["transactions"])
 
-
-# ---------------------------------------------------------------------------
-# GET /transactions/balance
-# MUST be defined BEFORE GET /transactions/{transaction_id}
-# Why? FastAPI matches routes top-to-bottom. If /{transaction_id} came first,
-# then a request to /transactions/balance would try to use "balance" as an
-# integer ID and fail.
-# ---------------------------------------------------------------------------
 
 @router.get("/balance")
 def read_balance(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
-    # ↑ This single line is all it takes to protect a route.
-    #   FastAPI calls get_current_user(), which calls decode_token() + DB lookup.
-    #   If the token is missing/invalid, a 401 is raised BEFORE this function runs.
-    #   If everything is fine, `current_user` is the logged-in User object.
 ):
     """Returns total income, total expense, and net balance for the current user."""
     return get_balance(db, current_user.id)
-    # current_user.id — we got the full User object from the dependency,
-    # so we can access any field on it.
 
 
 # ---------------------------------------------------------------------------
-# GET /transactions/
-# Returns a list of all transactions for the current user.
-# response_model=List[TransactionOut] tells FastAPI to:
-#   1. Serialize each Transaction ORM object as a TransactionOut schema
-#   2. Filter out any fields not in TransactionOut (good for security)
-#   3. Auto-generate the correct response shape in /docs
+# GET /transactions/?type=income&category=Food&skip=0&limit=20
+#
+# Query parameters are any extra key=value pairs after the "?" in the URL.
+# FastAPI detects them automatically — if a param isn't a path param ({id})
+# and isn't a request body, FastAPI treats it as a query param.
+#
+# Optional[str] = Query(None) means the param is not required.
+# If the client doesn't send it, it defaults to None.
+# Query() lets you add extra metadata like description (shown in /docs).
 # ---------------------------------------------------------------------------
 
 @router.get("/", response_model=List[TransactionOut])
 def read_transactions(
     db: Session = Depends(get_db),
     current_user: User = Depends(get_current_user),
+    type: Optional[TransactionType] = Query(None, description="Filter by income or expense"),
+    category: Optional[str] = Query(None, description="Filter by category name"),
+    skip: int = Query(0, ge=0, description="Number of records to skip"),
+    limit: int = Query(20, ge=1, le=100, description="Max records to return"),
+    # ge=0 means "greater than or equal to 0" — FastAPI validates this automatically.
+    # If the client sends skip=-1, FastAPI returns a 422 error before the function runs.
+    # le=100 means limit cannot exceed 100 — prevents a client from fetching huge pages.
 ):
-    """Returns all transactions belonging to the currently logged-in user."""
-    return get_transactions(db, current_user.id)
+    """Returns transactions with optional filtering by type/category and pagination."""
+    return get_transactions(db, current_user.id, type_filter=type, category=category, skip=skip, limit=limit)
 
 
 # ---------------------------------------------------------------------------
